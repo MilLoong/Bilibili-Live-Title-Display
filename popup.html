@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>直播标题显示设置</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <h1>标题样式</h1>
+
+    <label class="field">
+      <span>字体大小</span>
+      <div class="row">
+        <input id="fontSize" type="range" min="11" max="22" step="1" />
+        <output id="fontSizeValue">13</output>
+      </div>
+    </label>
+
+    <label class="field">
+      <span>字体颜色</span>
+      <div class="row">
+        <input id="color" type="color" value="#fb7299" />
+        <input id="colorText" type="text" maxlength="7" spellcheck="false" />
+      </div>
+    </label>
+
+    <div class="preview-wrap">
+      <div id="preview" class="preview">直播标题预览</div>
+    </div>
+
+    <div class="actions">
+      <button id="reset" type="button" class="ghost">恢复默认</button>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

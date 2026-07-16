@@ -1,0 +1,55 @@
+/* 撑开 B 站固定高度的头部，让标题行能完整显示 */
+.bili-live-title-section,
+.head-info-section.bili-live-title-section {
+  height: auto !important;
+  min-height: 64px !important;
+  overflow: visible !important;
+}
+
+#head-info-vm.bili-live-title-host {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+  height: auto !important;
+  min-height: 64px !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+#head-info-vm.bili-live-title-host > a {
+  position: relative !important;
+  z-index: 1 !important;
+  flex: 0 0 auto !important;
+}
+
+#head-info-vm.bili-live-title-host > div:not(.bili-live-title-display) {
+  position: relative !important;
+  z-index: 1 !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+.bili-live-title-display {
+  flex: 1 1 100% !important;
+  order: 99 !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 8px 0 0 !important;
+  padding: 4px 10px !important;
+  position: relative !important;
+  z-index: 2 !important;
+  display: block !important;
+  overflow: visible !important;
+  border-radius: 4px !important;
+  background: rgba(251, 114, 153, 0.12) !important;
+  border-left: 3px solid #fb7299 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  line-height: 1.4 !important;
+  color: #fb7299 !important;
+  word-break: break-word !important;
+  white-space: normal !important;
+  cursor: default;
+  user-select: text;
+}

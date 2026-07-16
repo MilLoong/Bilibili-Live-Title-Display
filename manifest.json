@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Bilibili 直播标题显示",
+  "version": "1.5.0",
+  "description": "在哔哩哔哩网页直播间头部信息区显示当前直播标题",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "直播标题显示设置",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://live.bilibili.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
