@@ -9,7 +9,7 @@
 1. 打开 `chrome://extensions`（或 Edge：`edge://extensions`）
 2. 开启**「开发者模式」→「加载已解压的扩展程序」**
 3. 选择 本仓库根目录（`Bilibili-Live-Title-Display`）
-4. 打开 `https://live.bilibili.com/...` 直播间即可
+4. 打开 `https://live.bilibili.com/...` 直播间即可 
 
 点击 **扩展图标** 可修改标题字体大小和颜色。
 
