@@ -1,49 +1,148 @@
 (() => {
-  // 从 #link-app-title 解析直播名，插入 #head-info-vm（等头像/信息区就绪后）
+  // 主流程：解析 #link-app-title → 插入 #head-info-vm（all_frames；无头部时顶层兜底）
+  const IS_TOP = window === window.top;
+
   const TITLE_SOURCE_ID = "link-app-title";
   const HEAD_INFO_ID = "head-info-vm";
   const DISPLAY_ID = "bili-live-title-display";
   const HOST_CLASS = "bili-live-title-host";
   const SECTION_CLASS = "bili-live-title-section";
+  const FALLBACK_CLASS = "bili-live-title-fallback";
   const RETRY_MS = 300;
-  const MAX_RETRIES = 80;
+  const FALLBACK_AFTER_RETRIES = 15;
 
   // 标签格式：<直播名> - <UP名> - 哔哩哔哩直播…
-  const BILI_TAB_SUFFIX_RE = /\s*-\s*哔哩哔哩直播(?:，二次元弹幕直播平台)?\s*$/;
-
-  const DEFAULT_STYLE = {
-    fontSize: 13,
-    color: "#fb7299",
-  };
+  const BILI_TAB_SUFFIX_RE = /\s*[-–—－]\s*哔哩哔哩直播.*$/;
+  const DEFAULT_STYLE = { fontSize: 13, color: "#fb7299" };
 
   let styleSettings = { ...DEFAULT_STYLE };
   let lastTitle = "";
-  let retryCount = 0;
+  let lastRawTitle = "";
   let titleObserver = null;
   let observedTitleEl = null;
   let headObserver = null;
+  let observedHeadInfo = null;
   let scheduled = false;
+  let retryCount = 0;
+
+  /*
+  // 临时调试（需要时取消注释）
+  const DEBUG = true;
+  const LOG_PREFIX = "[bili-live-title]";
+  function debug(...args) {
+    if (DEBUG) console.log(LOG_PREFIX, ...args);
+  }
+  */
+
+  function queryByXPath(xpath, root = document) {
+    try {
+      const doc =
+        root.nodeType === Node.DOCUMENT_NODE ? root : root.ownerDocument;
+      return doc.evaluate(
+        xpath,
+        root,
+        null,
+        XPathResult.FIRST_ORDERED_NODE_TYPE,
+        null
+      ).singleNodeValue;
+    } catch {
+      return null;
+    }
+  }
+
+  function readNodeText(el) {
+    if (!el) return "";
+    return (el.textContent || el.getAttribute?.("title") || "").trim();
+  }
+
+  function findById(id, doc = document) {
+    return (
+      doc.getElementById(id) ||
+      doc.querySelector(`#${id}`) ||
+      queryByXPath(`//*[@id="${id}"]`, doc)
+    );
+  }
+
+  function findLinkAppTitle() {
+    const local = findById(TITLE_SOURCE_ID, document);
+    if (local) {
+      return {
+        el: local,
+        where: IS_TOP ? "top" : "this-frame",
+        text: readNodeText(local),
+      };
+    }
+    if (!IS_TOP) return { el: null, where: null, text: "" };
+
+    const frames = Array.from(document.querySelectorAll("iframe"));
+    for (let i = 0; i < frames.length; i += 1) {
+      try {
+        const doc = frames[i].contentDocument;
+        if (!doc) continue;
+        const el = findById(TITLE_SOURCE_ID, doc);
+        if (el) {
+          return { el, where: `iframe[${i}]`, text: readNodeText(el) };
+        }
+      } catch {
+        /* cross-origin：由 all_frames 子帧脚本处理 */
+      }
+    }
+    return { el: null, where: null, text: "" };
+  }
+
+  function findHeadInfo() {
+    const local = findById(HEAD_INFO_ID, document);
+    if (local) {
+      return { el: local, where: IS_TOP ? "top" : "this-frame", doc: document };
+    }
+    if (!IS_TOP) return { el: null, where: null, doc: null };
+
+    const frames = Array.from(document.querySelectorAll("iframe"));
+    for (let i = 0; i < frames.length; i += 1) {
+      try {
+        const doc = frames[i].contentDocument;
+        if (!doc) continue;
+        const el = findById(HEAD_INFO_ID, doc);
+        if (el) return { el, where: `iframe[${i}]`, doc };
+      } catch {
+        /* cross-origin */
+      }
+    }
+    return { el: null, where: null, doc: null };
+  }
 
   function parseLiveTitleFromTab(raw) {
     if (!raw) return "";
     let text = raw.trim().replace(BILI_TAB_SUFFIX_RE, "").trim();
     if (!text) return "";
-
     const sep = " - ";
     const lastSep = text.lastIndexOf(sep);
     if (lastSep === -1) return text;
+    // 只去掉最后一段 UP 名，直播名里可含 " - "
     return text.slice(0, lastSep).trim() || text;
   }
 
-  function getTitleText() {
-    const tabEl = document.getElementById(TITLE_SOURCE_ID);
-    if (!tabEl) return "";
-    const raw = (tabEl.textContent || tabEl.getAttribute("title") || "").trim();
-    return parseLiveTitleFromTab(raw);
+  function getRawTitleText() {
+    const hit = findLinkAppTitle();
+    if (hit.text) return hit.text;
+
+    const titleTag = document.querySelector("head > title");
+    const fromTag = readNodeText(titleTag);
+    if (fromTag && /哔哩哔哩直播/.test(fromTag)) return fromTag;
+    if (fromTag && !IS_TOP) return fromTag;
+
+    const docTitle = (document.title || "").trim();
+    if (docTitle && /哔哩哔哩直播/.test(docTitle)) return docTitle;
+    if (docTitle && !IS_TOP) return docTitle;
+    return "";
   }
 
   function getAvatar(headInfo) {
-    return headInfo.querySelector(":scope > a");
+    return (
+      headInfo.querySelector(":scope > a") ||
+      headInfo.querySelector("a[href*='space.bilibili.com']") ||
+      headInfo.querySelector("a")
+    );
   }
 
   function getInfoBox(headInfo) {
@@ -53,7 +152,11 @@
   }
 
   function isHeadReady(headInfo) {
-    return Boolean(getAvatar(headInfo) && getInfoBox(headInfo));
+    return Boolean(
+      getAvatar(headInfo) ||
+        getInfoBox(headInfo) ||
+        headInfo.childElementCount > 0
+    );
   }
 
   function hexToRgba(hex, alpha) {
@@ -78,61 +181,110 @@
     if (section) section.classList.add(SECTION_CLASS);
   }
 
-  function ensureDisplayNode(headInfo) {
+  function ensureDisplayInHead(headInfo) {
     const infoBox = getInfoBox(headInfo);
-    let node = document.getElementById(DISPLAY_ID);
+    let node = headInfo.ownerDocument.getElementById(DISPLAY_ID);
 
     if (!node) {
-      node = document.createElement("div");
+      node = headInfo.ownerDocument.createElement("div");
       node.id = DISPLAY_ID;
       node.className = "bili-live-title-display";
       node.setAttribute("role", "text");
     }
 
-    if (infoBox.nextElementSibling !== node) {
-      infoBox.insertAdjacentElement("afterend", node);
+    node.classList.remove(FALLBACK_CLASS);
+    if (infoBox && infoBox.parentElement === headInfo) {
+      if (infoBox.nextElementSibling !== node) {
+        infoBox.insertAdjacentElement("afterend", node);
+      }
+    } else if (node.parentElement !== headInfo) {
+      headInfo.appendChild(node);
     }
 
     applyStyle(node);
     return node;
   }
 
+  // 无 #head-info-vm 时（部分活动页）顶层固定显示
+  function ensureFallbackDisplay() {
+    if (!IS_TOP) return null;
+    let node = document.getElementById(DISPLAY_ID);
+    if (!node) {
+      node = document.createElement("div");
+      node.id = DISPLAY_ID;
+      node.setAttribute("role", "text");
+      document.body.appendChild(node);
+    }
+    node.className = `bili-live-title-display ${FALLBACK_CLASS}`;
+    if (node.parentElement !== document.body) document.body.appendChild(node);
+    applyStyle(node);
+    return node;
+  }
+
   function renderTitle() {
     scheduled = false;
-    const headInfo = document.getElementById(HEAD_INFO_ID);
-    const title = getTitleText();
+    const raw = getRawTitleText();
+    const title = parseLiveTitleFromTab(raw);
+    const head = findHeadInfo();
 
-    if (!headInfo || !title) {
+    if (!IS_TOP && !head.el) return false;
+
+    if (!title) {
+      retryCount += 1;
       scheduleRetry();
+      observeTitleSource();
       return false;
     }
 
-    if (!isHeadReady(headInfo)) {
-      const early = document.getElementById(DISPLAY_ID);
-      if (early) early.remove();
+    let display = null;
+    let mode = "";
+
+    if (head.el && isHeadReady(head.el)) {
+      markLayoutHosts(head.el);
+      display = ensureDisplayInHead(head.el);
+      mode = "head-info";
+      observeHeadInfo(head.el);
+      if (IS_TOP) {
+        const fb = document.getElementById(DISPLAY_ID);
+        if (fb && fb.classList.contains(FALLBACK_CLASS) && fb !== display) {
+          fb.remove();
+        }
+      }
+    } else if (head.el) {
+      retryCount += 1;
+      observeHeadInfo(head.el);
       scheduleRetry();
-      observeHeadInfo(headInfo);
+      observeTitleSource();
+      return false;
+    } else if (IS_TOP && retryCount >= FALLBACK_AFTER_RETRIES) {
+      display = ensureFallbackDisplay();
+      mode = "fallback";
+    } else {
+      retryCount += 1;
+      scheduleRetry();
+      observeTitleSource();
       return false;
     }
 
-    retryCount = 0;
-    markLayoutHosts(headInfo);
-    const display = ensureDisplayNode(headInfo);
+    if (!display) return false;
 
-    if (title !== lastTitle) {
+    if (title !== lastTitle || raw !== lastRawTitle || !display.textContent) {
       lastTitle = title;
+      lastRawTitle = raw;
       display.textContent = title;
       display.setAttribute("title", title);
+      if (mode !== "fallback") retryCount = 0;
+    } else {
+      applyStyle(display);
     }
 
+    if (mode === "fallback") scheduleRetry();
     observeTitleSource();
-    observeHeadInfo(headInfo);
     return true;
   }
 
   function scheduleRetry() {
-    if (retryCount >= MAX_RETRIES || scheduled) return;
-    retryCount += 1;
+    if (scheduled) return;
     scheduled = true;
     window.setTimeout(renderTitle, RETRY_MS);
   }
@@ -144,14 +296,15 @@
   }
 
   function observeTitleSource() {
-    const source = document.getElementById(TITLE_SOURCE_ID);
+    const source =
+      findLinkAppTitle().el || document.querySelector("head > title");
     if (!source) return;
     if (titleObserver && observedTitleEl === source) return;
-
     if (titleObserver) titleObserver.disconnect();
     observedTitleEl = source;
     titleObserver = new MutationObserver(() => {
       lastTitle = "";
+      lastRawTitle = "";
       queueRender();
     });
     titleObserver.observe(source, {
@@ -164,21 +317,19 @@
   }
 
   function observeHeadInfo(headInfo) {
-    if (headObserver) return;
-
+    if (headObserver && observedHeadInfo === headInfo) return;
+    if (headObserver) headObserver.disconnect();
+    observedHeadInfo = headInfo;
     headObserver = new MutationObserver(() => {
-      const node = document.getElementById(DISPLAY_ID);
-      if (!isHeadReady(headInfo)) {
-        if (node) node.remove();
-        lastTitle = "";
-        queueRender();
-        return;
-      }
-      if (!node || node.parentElement !== headInfo) lastTitle = "";
+      lastTitle = "";
       queueRender();
     });
     headObserver.observe(headInfo, { childList: true, subtree: true });
   }
+
+  new MutationObserver(() => {
+    if (findById(HEAD_INFO_ID) || findById(TITLE_SOURCE_ID)) queueRender();
+  }).observe(document.documentElement, { childList: true, subtree: true });
 
   function loadStyleSettings() {
     chrome.storage.sync.get(DEFAULT_STYLE, (data) => {
@@ -203,30 +354,23 @@
   });
 
   let lastHref = location.href;
-  const pageObserver = new MutationObserver(() => {
+  new MutationObserver(() => {
     if (location.href !== lastHref) {
       lastHref = location.href;
       lastTitle = "";
+      lastRawTitle = "";
       retryCount = 0;
-      if (titleObserver) {
-        titleObserver.disconnect();
-        titleObserver = null;
-        observedTitleEl = null;
-      }
-      if (headObserver) {
-        headObserver.disconnect();
-        headObserver = null;
-      }
       document.getElementById(DISPLAY_ID)?.remove();
       queueRender();
-    } else if (!document.getElementById(HEAD_INFO_ID)) {
-      queueRender();
     }
-  });
-  pageObserver.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
+  window.setInterval(() => {
+    const raw = getRawTitleText();
+    const head = findHeadInfo();
+    if (raw && raw !== lastRawTitle) queueRender();
+    if (raw && head.el && !document.getElementById(DISPLAY_ID)) queueRender();
+  }, 1000);
 
   loadStyleSettings();
   if (document.readyState === "loading") {
