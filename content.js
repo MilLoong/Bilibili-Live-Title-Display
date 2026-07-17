@@ -1,5 +1,5 @@
 (() => {
-  // 主流程：解析 #link-app-title → 插入 #head-info-vm（all_frames；无头部时顶层兜底）
+  // 主流程：解析 #link-app-title → 插入 #head-info-vm（仅在存在 head-info-vm 时加载容器）
   const IS_TOP = window === window.top;
 
   const TITLE_SOURCE_ID = "link-app-title";
@@ -7,9 +7,7 @@
   const DISPLAY_ID = "bili-live-title-display";
   const HOST_CLASS = "bili-live-title-host";
   const SECTION_CLASS = "bili-live-title-section";
-  const FALLBACK_CLASS = "bili-live-title-fallback";
   const RETRY_MS = 300;
-  const FALLBACK_AFTER_RETRIES = 15;
 
   // 标签格式：<直播名> - <UP名> - 哔哩哔哩直播…
   const BILI_TAB_SUFFIX_RE = /\s*[-–—－]\s*哔哩哔哩直播.*$/;
@@ -192,7 +190,6 @@
       node.setAttribute("role", "text");
     }
 
-    node.classList.remove(FALLBACK_CLASS);
     if (infoBox && infoBox.parentElement === headInfo) {
       if (infoBox.nextElementSibling !== node) {
         infoBox.insertAdjacentElement("afterend", node);
@@ -205,29 +202,18 @@
     return node;
   }
 
-  // 无 #head-info-vm 时（部分活动页）顶层固定显示
-  function ensureFallbackDisplay() {
-    if (!IS_TOP) return null;
-    let node = document.getElementById(DISPLAY_ID);
-    if (!node) {
-      node = document.createElement("div");
-      node.id = DISPLAY_ID;
-      node.setAttribute("role", "text");
-      document.body.appendChild(node);
-    }
-    node.className = `bili-live-title-display ${FALLBACK_CLASS}`;
-    if (node.parentElement !== document.body) document.body.appendChild(node);
-    applyStyle(node);
-    return node;
-  }
-
   function renderTitle() {
     scheduled = false;
     const raw = getRawTitleText();
     const title = parseLiveTitleFromTab(raw);
     const head = findHeadInfo();
 
-    if (!IS_TOP && !head.el) return false;
+    // 没有 head-info-vm 时不创建 #bili-live-title-display
+    if (!head.el) {
+      document.getElementById(DISPLAY_ID)?.remove();
+      observeTitleSource();
+      return false;
+    }
 
     if (!title) {
       retryCount += 1;
@@ -236,49 +222,28 @@
       return false;
     }
 
-    let display = null;
-    let mode = "";
-
-    if (head.el && isHeadReady(head.el)) {
-      markLayoutHosts(head.el);
-      display = ensureDisplayInHead(head.el);
-      mode = "head-info";
-      observeHeadInfo(head.el);
-      if (IS_TOP) {
-        const fb = document.getElementById(DISPLAY_ID);
-        if (fb && fb.classList.contains(FALLBACK_CLASS) && fb !== display) {
-          fb.remove();
-        }
-      }
-    } else if (head.el) {
+    if (!isHeadReady(head.el)) {
       retryCount += 1;
       observeHeadInfo(head.el);
-      scheduleRetry();
-      observeTitleSource();
-      return false;
-    } else if (IS_TOP && retryCount >= FALLBACK_AFTER_RETRIES) {
-      display = ensureFallbackDisplay();
-      mode = "fallback";
-    } else {
-      retryCount += 1;
       scheduleRetry();
       observeTitleSource();
       return false;
     }
 
-    if (!display) return false;
+    markLayoutHosts(head.el);
+    const display = ensureDisplayInHead(head.el);
+    observeHeadInfo(head.el);
 
     if (title !== lastTitle || raw !== lastRawTitle || !display.textContent) {
       lastTitle = title;
       lastRawTitle = raw;
       display.textContent = title;
       display.setAttribute("title", title);
-      if (mode !== "fallback") retryCount = 0;
+      retryCount = 0;
     } else {
       applyStyle(display);
     }
 
-    if (mode === "fallback") scheduleRetry();
     observeTitleSource();
     return true;
   }
